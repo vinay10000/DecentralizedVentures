@@ -12,6 +12,8 @@ import { auth, firestore } from "./config";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { UserRole } from "../contexts/AuthContext";
 
+export { auth };
+
 export interface SignUpData {
   email: string;
   password: string;

@@ -11,7 +11,7 @@ import {
   insertMessageSchema,
 } from "@shared/schema";
 import { z } from "zod";
-import { ZodValidationError } from "zod-validation-error";
+import { fromZodError } from "zod-validation-error";
 import session from "express-session";
 import MemoryStore from "memorystore";
 
@@ -39,7 +39,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return schema.parse(data);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const validationError = new ZodValidationError(error);
+        const validationError = fromZodError(error);
         throw new Error(validationError.message);
       }
       throw error;
