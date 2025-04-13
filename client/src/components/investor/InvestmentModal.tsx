@@ -8,7 +8,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { StartupData } from '@/firebase/firestore';
 import { createTransaction } from '@/firebase/firestore';
-import { convertUSDToINR, validateUPITransactionId } from '@/lib/upi';
+import { generateUpiUrl, generateQrCodeUrl, isValidUpiId } from '@/lib/upi';
 import { convertUsdToEth, sendTransaction, estimateGasFee, isMetaMaskInstalled } from '@/lib/metamask';
 
 interface InvestmentModalProps {
@@ -49,10 +49,11 @@ const InvestmentModal = ({ startup, isOpen, onClose }: InvestmentModalProps) => 
       }
     };
     
-    const calculateInrAmount = async () => {
+    const calculateInrAmount = () => {
       try {
         if (amount) {
-          const inr = await convertUSDToINR(parseFloat(amount));
+          // Static conversion ratio for demonstration (1 USD = 75 INR)
+          const inr = parseFloat(amount) * 75;
           setInrAmount(inr.toString());
         }
       } catch (error) {
@@ -168,7 +169,7 @@ const InvestmentModal = ({ startup, isOpen, onClose }: InvestmentModalProps) => 
         );
       } else if (paymentMethod === 'upi') {
         // Validate UPI transaction ID
-        if (!validateUPITransactionId(transactionId)) {
+        if (!transactionId || transactionId.trim().length < 12) {
           toast({
             title: "Invalid Transaction ID",
             description: "Please enter a valid UPI transaction ID.",

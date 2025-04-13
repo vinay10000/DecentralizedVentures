@@ -1,182 +1,274 @@
-import { ethers } from "ethers";
+import { ethers } from 'ethers';
 
-export interface MetaMaskTransaction {
-  from: string;
-  to: string;
-  value: string; // Value in wei
-  data?: string;
-}
-
-export interface MetaMaskProvider {
-  isMetaMask?: boolean;
-  request: (args: { method: string; params?: any[] }) => Promise<any>;
-  on: (eventName: string, listener: (...args: any[]) => void) => void;
-  removeListener: (eventName: string, listener: (...args: any[]) => void) => void;
-}
-
-declare global {
-  interface Window {
-    ethereum?: MetaMaskProvider;
-  }
-}
-
+/**
+ * Check if MetaMask is installed
+ */
 export const isMetaMaskInstalled = (): boolean => {
-  return typeof window !== "undefined" && window.ethereum !== undefined && window.ethereum.isMetaMask === true;
+  return typeof window !== 'undefined' && 
+    typeof window.ethereum !== 'undefined' && 
+    window.ethereum.isMetaMask;
 };
 
-export const connectWallet = async (): Promise<string> => {
-  if (!isMetaMaskInstalled()) {
-    throw new Error("MetaMask is not installed. Please install MetaMask to continue.");
-  }
-
+/**
+ * Convert USD amount to ETH
+ * Note: In a production environment, this would use a real price feed like Chainlink
+ */
+export const convertUsdToEth = async (usdAmount: number): Promise<number> => {
   try {
-    const accounts = await window.ethereum!.request({
-      method: "eth_requestAccounts",
-    });
-
-    if (accounts.length === 0) {
-      throw new Error("No accounts found. Please check your MetaMask configuration.");
-    }
-
-    return accounts[0]; // Return the connected wallet address
+    // For demonstration purposes, we're using a static exchange rate
+    // In a real application, you would fetch this from an API
+    const ethPriceInUsd = 2500; // Example: 1 ETH = $2500 USD
+    return usdAmount / ethPriceInUsd;
   } catch (error) {
-    console.error("Error connecting to MetaMask:", error);
+    console.error('Error converting USD to ETH:', error);
     throw error;
   }
 };
 
-export const getWalletAddress = async (): Promise<string | null> => {
+/**
+ * Estimate gas fee for a transaction
+ * Note: In a production environment, this would use the actual network conditions
+ */
+export const estimateGasFee = async (): Promise<string> => {
+  try {
+    if (!isMetaMaskInstalled()) {
+      return '0.003'; // Default gas fee estimate in ETH
+    }
+    
+    const provider = getProvider();
+    
+    if (!provider) {
+      return '0.003';
+    }
+    
+    // Get current gas price
+    const gasPrice = await provider.getFeeData();
+    
+    // Calculate gas fee for a typical ETH transfer (21000 gas units)
+    if (gasPrice.gasPrice) {
+      const gasFee = ethers.formatEther(gasPrice.gasPrice * BigInt(21000));
+      return gasFee;
+    }
+    
+    return '0.003'; // Fallback estimate
+  } catch (error) {
+    console.error('Error estimating gas fee:', error);
+    return '0.003'; // Fallback estimate on error
+  }
+};
+
+/**
+ * Get the current Ethereum provider
+ */
+export const getProvider = (): ethers.BrowserProvider | null => {
   if (!isMetaMaskInstalled()) {
     return null;
   }
+  
+  return new ethers.BrowserProvider(window.ethereum);
+};
 
+/**
+ * Connect to MetaMask
+ */
+export const connectMetaMask = async (): Promise<string | null> => {
   try {
-    const accounts = await window.ethereum!.request({
-      method: "eth_accounts",
-    });
+    if (!isMetaMaskInstalled()) {
+      throw new Error('MetaMask is not installed');
+    }
+    
+    const provider = getProvider();
+    
+    if (!provider) {
+      throw new Error('Failed to get Ethereum provider');
+    }
+    
+    // Request account access
+    const accounts = await provider.send('eth_requestAccounts', []);
+    
+    if (accounts.length === 0) {
+      throw new Error('No accounts found');
+    }
+    
+    return accounts[0];
+  } catch (error) {
+    console.error('Error connecting to MetaMask:', error);
+    throw error;
+  }
+};
 
+/**
+ * Get user's wallet address
+ */
+export const getWalletAddress = async (): Promise<string | null> => {
+  try {
+    if (!isMetaMaskInstalled()) {
+      return null;
+    }
+    
+    const provider = getProvider();
+    
+    if (!provider) {
+      return null;
+    }
+    
+    const accounts = await provider.send('eth_accounts', []);
+    
     if (accounts.length === 0) {
       return null;
     }
-
+    
     return accounts[0];
   } catch (error) {
-    console.error("Error getting wallet address:", error);
+    console.error('Error getting wallet address:', error);
     return null;
   }
 };
 
+/**
+ * Get Ethereum network chain ID
+ */
+export const getChainId = async (): Promise<string | null> => {
+  try {
+    if (!isMetaMaskInstalled()) {
+      return null;
+    }
+    
+    const provider = getProvider();
+    
+    if (!provider) {
+      return null;
+    }
+    
+    const { chainId } = await provider.getNetwork();
+    
+    return chainId.toString();
+  } catch (error) {
+    console.error('Error getting chain ID:', error);
+    return null;
+  }
+};
+
+/**
+ * Get ETH balance in wallet
+ */
+export const getBalance = async (address: string): Promise<string | null> => {
+  try {
+    if (!isMetaMaskInstalled()) {
+      return null;
+    }
+    
+    const provider = getProvider();
+    
+    if (!provider) {
+      return null;
+    }
+    
+    const balance = await provider.getBalance(address);
+    
+    return ethers.formatEther(balance);
+  } catch (error) {
+    console.error('Error getting balance:', error);
+    return null;
+  }
+};
+
+/**
+ * Send ETH to an address
+ */
 export const sendTransaction = async (
   to: string,
-  amount: string, // Amount in ETH
-  onSuccess?: (transactionHash: string) => void,
-  onError?: (error: Error) => void
+  amount: string,
+  onHash?: (hash: string) => void
 ): Promise<string> => {
-  if (!isMetaMaskInstalled()) {
-    throw new Error("MetaMask is not installed. Please install MetaMask to continue.");
-  }
-
   try {
-    // Convert ETH to Wei
-    const valueInWei = ethers.utils.parseEther(amount).toString();
-
+    if (!isMetaMaskInstalled()) {
+      throw new Error('MetaMask is not installed');
+    }
+    
+    const provider = getProvider();
+    
+    if (!provider) {
+      throw new Error('Failed to get Ethereum provider');
+    }
+    
+    const signer = await provider.getSigner();
+    
+    // Convert amount from ETH to wei
+    const amountWei = ethers.parseEther(amount);
+    
     // Prepare transaction
-    const transaction: MetaMaskTransaction = {
-      from: await getWalletAddress() as string,
+    const tx = {
       to,
-      value: valueInWei,
+      value: amountWei
     };
-
+    
     // Send transaction
-    const transactionHash = await window.ethereum!.request({
-      method: "eth_sendTransaction",
-      params: [transaction],
-    });
-
-    if (onSuccess) {
-      onSuccess(transactionHash);
-    }
-
-    return transactionHash;
-  } catch (error: any) {
-    console.error("Error sending transaction:", error);
+    const transaction = await signer.sendTransaction(tx);
     
-    if (onError) {
-      onError(error);
+    // If a callback for tx hash is provided, call it
+    if (onHash) {
+      onHash(transaction.hash);
     }
     
+    // Wait for transaction to be mined
+    const receipt = await transaction.wait();
+    
+    if (!receipt) {
+      throw new Error('Transaction failed');
+    }
+    
+    return transaction.hash;
+  } catch (error) {
+    console.error('Error sending transaction:', error);
     throw error;
   }
 };
 
-export const listenForAccountChanges = (
-  onAccountsChanged: (accounts: string[]) => void
-): (() => void) => {
+// Add event listener for account changes
+export const addAccountChangedListener = (callback: (accounts: string[]) => void) => {
   if (!isMetaMaskInstalled()) {
-    return () => {};
+    return;
   }
-
-  const handleAccountsChanged = (accounts: string[]) => {
-    onAccountsChanged(accounts);
-  };
-
-  window.ethereum!.on("accountsChanged", handleAccountsChanged);
-
-  // Return a function to remove the listener
-  return () => {
-    window.ethereum!.removeListener("accountsChanged", handleAccountsChanged);
-  };
+  
+  window.ethereum.on('accountsChanged', callback);
 };
 
-export const getEthToUsdRate = async (): Promise<number> => {
-  try {
-    // This is a simplified example. In production, you'd use a real price oracle
-    // or API like CoinGecko or CryptoCompare
-    const response = await fetch(
-      "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
-    );
-    const data = await response.json();
-    return data.ethereum.usd;
-  } catch (error) {
-    console.error("Error fetching ETH to USD rate:", error);
-    // Fallback to a reasonable recent value if the API fails
-    return 3500;
-  }
-};
-
-export const convertUsdToEth = async (usdAmount: number): Promise<number> => {
-  const ethToUsdRate = await getEthToUsdRate();
-  return usdAmount / ethToUsdRate;
-};
-
-export const convertEthToUsd = async (ethAmount: number): Promise<number> => {
-  const ethToUsdRate = await getEthToUsdRate();
-  return ethAmount * ethToUsdRate;
-};
-
-export const estimateGasFee = async (): Promise<string> => {
+// Add event listener for chain changes
+export const addChainChangedListener = (callback: (chainId: string) => void) => {
   if (!isMetaMaskInstalled()) {
-    throw new Error("MetaMask is not installed.");
+    return;
   }
-
-  try {
-    // Get current gas price
-    const gasPrice = await window.ethereum!.request({
-      method: "eth_gasPrice",
-    });
-
-    // Convert from hex to decimal (wei)
-    const gasPriceInWei = parseInt(gasPrice, 16);
-
-    // Estimate gas for a typical ETH transfer (21000 gas units)
-    const gasLimit = 21000;
-    const gasFeeInWei = gasPriceInWei * gasLimit;
-
-    // Convert to ETH with 6 decimal places
-    const gasFeeInEth = ethers.utils.formatEther(gasFeeInWei.toString());
-    return parseFloat(gasFeeInEth).toFixed(6);
-  } catch (error) {
-    console.error("Error estimating gas fee:", error);
-    return "0.003"; // Fallback to a reasonable recent value
-  }
+  
+  window.ethereum.on('chainChanged', callback);
 };
+
+// Remove event listener for account changes
+export const removeAccountChangedListener = (callback: (accounts: string[]) => void) => {
+  if (!isMetaMaskInstalled()) {
+    return;
+  }
+  
+  window.ethereum.removeListener('accountsChanged', callback);
+};
+
+// Remove event listener for chain changes
+export const removeChainChangedListener = (callback: (chainId: string) => void) => {
+  if (!isMetaMaskInstalled()) {
+    return;
+  }
+  
+  window.ethereum.removeListener('chainChanged', callback);
+};
+
+// Add Ethereum interface to Window
+declare global {
+  interface Window {
+    ethereum?: {
+      isMetaMask: boolean;
+      request: (request: { method: string; params?: any[] }) => Promise<any>;
+      on: (event: string, callback: any) => void;
+      removeListener: (event: string, callback: any) => void;
+    };
+  }
+}

@@ -1,105 +1,124 @@
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import React, { useState } from 'react';
+import { useLocation } from 'wouter';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import SignInForm from './SignInForm';
 import SignUpForm from './SignUpForm';
-import { FaGoogle } from 'react-icons/fa';
-import { signInWithGoogle } from '@/firebase/auth';
-import { useToast } from '@/hooks/use-toast';
-import { useLocation } from 'wouter';
+import { Button } from '@/components/ui/button';
+import { AlertTriangle } from 'lucide-react';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
 const AuthPage = () => {
-  const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
-  const [isLoading, setIsLoading] = useState(false);
-  const { toast } = useToast();
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
+  const [error, setError] = useState<string | null>(null);
+  const [isMetaMaskConnecting, setIsMetaMaskConnecting] = useState(false);
 
-  const handleGoogleSignIn = async () => {
+  // Extract 'tab' query parameter
+  const searchParams = new URLSearchParams(window.location.search);
+  const defaultTab = searchParams.get('tab') === 'signup' ? 'signup' : 'signin';
+
+  const handleMetaMaskConnect = async () => {
     try {
-      setIsLoading(true);
-      await signInWithGoogle();
-      toast({
-        title: "Success",
-        description: "You have successfully signed in with Google",
-      });
-      setLocation('/investor/dashboard'); // Default to investor dashboard after Google sign-in
-    } catch (error: any) {
-      console.error('Google sign-in error:', error);
-      toast({
-        title: "Error",
-        description: error.message || "Failed to sign in with Google",
-        variant: "destructive",
-      });
+      setIsMetaMaskConnecting(true);
+      setError(null);
+      
+      // Check if MetaMask is installed
+      if (typeof window.ethereum === 'undefined') {
+        throw new Error('MetaMask is not installed. Please install it to continue.');
+      }
+      
+      // Request account access
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      
+      // Check if any accounts were returned
+      if (accounts.length === 0) {
+        throw new Error('No accounts found. Please create an account in MetaMask and try again.');
+      }
+      
+      // Successfully connected to MetaMask
+      // In a real app we'd trigger a wallet sign-in flow here
+      console.log('Connected to MetaMask', accounts[0]);
+      
+      // Redirect to a registration/profile page where the user can complete their profile
+      setLocation('/auth/complete-profile?wallet=' + accounts[0]);
+      
+    } catch (error) {
+      console.error('MetaMask connection error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to connect to MetaMask');
     } finally {
-      setIsLoading(false);
+      setIsMetaMaskConnecting(false);
     }
   };
 
   return (
-    <div className="container mx-auto px-4 flex items-center justify-center min-h-screen">
-      <div className="w-full max-w-md">
-        <Card className="border-0 shadow-lg">
-          <CardHeader className="space-y-1 text-center">
-            <CardTitle className="text-2xl font-bold">Welcome to StartupVest</CardTitle>
-            <CardDescription>
-              Connect, invest, and grow with innovative startups
-            </CardDescription>
+    <div className="flex min-h-screen flex-col items-center justify-center p-4 bg-gray-50 dark:bg-gray-900">
+      <div className="w-full max-w-md space-y-6">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold">StartupVest</h1>
+          <p className="text-gray-500 dark:text-gray-400">Connect, invest, and grow together</p>
+        </div>
+        
+        {error && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        
+        <Card>
+          <CardHeader>
+            <CardTitle>Welcome</CardTitle>
+            <CardDescription>Sign in or create an account to continue</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'signin' | 'signup')}>
+          <CardContent>
+            <Tabs defaultValue={defaultTab} className="w-full">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="signin">Sign In</TabsTrigger>
                 <TabsTrigger value="signup">Sign Up</TabsTrigger>
               </TabsList>
               <TabsContent value="signin">
-                <SignInForm onSuccess={() => setLocation(window.history.state?.from || '/')} />
+                <SignInForm setError={setError} />
               </TabsContent>
               <TabsContent value="signup">
-                <SignUpForm onSuccess={() => setActiveTab('signin')} />
+                <SignUpForm setError={setError} />
               </TabsContent>
             </Tabs>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
+            
+            <div className="mt-6">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-gray-300 dark:border-gray-600" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-white dark:bg-gray-800 px-2 text-gray-500 dark:text-gray-400">
+                    Or continue with
+                  </span>
+                </div>
               </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">
-                  Or continue with
-                </span>
+              
+              <div className="mt-6 space-y-4">
+                <Button 
+                  variant="outline" 
+                  className="w-full flex items-center justify-center" 
+                  type="button"
+                  onClick={handleMetaMaskConnect}
+                  disabled={isMetaMaskConnecting}
+                >
+                  {isMetaMaskConnecting ? (
+                    <div className="mr-2 h-4 w-4 animate-spin rounded-full border-b-2 border-current"></div>
+                  ) : (
+                    <img 
+                      src="https://raw.githubusercontent.com/MetaMask/brand-resources/master/SVG/metamask-fox.svg" 
+                      alt="MetaMask" 
+                      className="mr-2 h-5 w-5"
+                    />
+                  )}
+                  Connect MetaMask Wallet
+                </Button>
               </div>
             </div>
-
-            <Button 
-              variant="outline" 
-              type="button" 
-              className="w-full" 
-              onClick={handleGoogleSignIn}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <div className="animate-spin mr-2 h-4 w-4 border-b-2 border-current"></div>
-              ) : (
-                <FaGoogle className="mr-2 h-4 w-4" />
-              )}
-              Google
-            </Button>
           </CardContent>
-          <CardFooter className="flex flex-col space-y-2 text-center text-sm text-muted-foreground">
-            <div>
-              By continuing, you agree to our{' '}
-              <a href="#" className="underline underline-offset-4 hover:text-primary">
-                Terms of Service
-              </a>{' '}
-              and{' '}
-              <a href="#" className="underline underline-offset-4 hover:text-primary">
-                Privacy Policy
-              </a>
-              .
-            </div>
-          </CardFooter>
         </Card>
       </div>
     </div>
@@ -107,3 +126,10 @@ const AuthPage = () => {
 };
 
 export default AuthPage;
+
+// Extend Window interface to include ethereum property
+declare global {
+  interface Window {
+    ethereum?: any;
+  }
+}

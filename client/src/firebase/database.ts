@@ -1,6 +1,18 @@
-import { ref, set, push, get, remove, onValue, off, query, orderByChild } from "firebase/database";
-import { database } from "./config";
+import { 
+  ref, 
+  set, 
+  push, 
+  get, 
+  query, 
+  orderByChild, 
+  equalTo,
+  onValue,
+  update,
+  serverTimestamp
+} from 'firebase/database';
+import { database } from './config';
 
+// Chat message interface
 export interface ChatMessage {
   id?: string;
   senderId: string;
@@ -11,6 +23,7 @@ export interface ChatMessage {
   read: boolean;
 }
 
+// Chat room interface
 export interface ChatRoom {
   id: string;
   participants: string[];
@@ -22,33 +35,28 @@ export interface ChatRoom {
   createdAt: number;
 }
 
-// Create a new chat room between two users
+/**
+ * Create a new chat room between two users
+ */
 export const createChatRoom = async (user1Id: string, user2Id: string): Promise<string> => {
   try {
-    // Check if a chat room already exists between these users
-    const existingRoom = await findChatRoom(user1Id, user2Id);
+    const roomRef = push(ref(database, 'chatRooms'));
+    const roomId = roomRef.key;
     
-    if (existingRoom) {
-      return existingRoom;
+    if (!roomId) {
+      throw new Error('Failed to generate chat room ID');
     }
     
-    // Create a new chat room
-    const chatRoomsRef = ref(database, 'chatRooms');
-    const newRoomRef = push(chatRoomsRef);
-    const roomId = newRoomRef.key as string;
+    const roomData = {
+      participants: [user1Id, user2Id],
+      createdAt: Date.now()
+    };
     
-    const participants = [user1Id, user2Id];
-    const now = Date.now();
+    await set(roomRef, roomData);
     
-    await set(newRoomRef, {
-      participants,
-      createdAt: now
-    });
-    
-    // Add this room to each user's chat rooms list
-    for (const userId of participants) {
-      await set(ref(database, `userChatRooms/${userId}/${roomId}`), true);
-    }
+    // Add room to user's chat rooms list
+    await set(ref(database, `userChatRooms/${user1Id}/${roomId}`), true);
+    await set(ref(database, `userChatRooms/${user2Id}/${roomId}`), true);
     
     return roomId;
   } catch (error) {
@@ -57,27 +65,27 @@ export const createChatRoom = async (user1Id: string, user2Id: string): Promise<
   }
 };
 
-// Find an existing chat room between two users
+/**
+ * Find an existing chat room between two users
+ */
 export const findChatRoom = async (user1Id: string, user2Id: string): Promise<string | null> => {
   try {
-    // Get user1's chat rooms
-    const user1RoomsRef = ref(database, `userChatRooms/${user1Id}`);
-    const user1RoomsSnapshot = await get(user1RoomsRef);
+    // Get user's chat rooms
+    const userRoomsSnapshot = await get(ref(database, `userChatRooms/${user1Id}`));
     
-    if (!user1RoomsSnapshot.exists()) {
+    if (!userRoomsSnapshot.exists()) {
       return null;
     }
     
-    const user1Rooms = Object.keys(user1RoomsSnapshot.val());
+    const userRooms: Record<string, boolean> = userRoomsSnapshot.val();
     
-    // For each room, check if user2 is a participant
-    for (const roomId of user1Rooms) {
-      const roomRef = ref(database, `chatRooms/${roomId}`);
-      const roomSnapshot = await get(roomRef);
+    // Check each room to see if the other user is a participant
+    for (const roomId of Object.keys(userRooms)) {
+      const roomSnapshot = await get(ref(database, `chatRooms/${roomId}`));
       
       if (roomSnapshot.exists()) {
         const room = roomSnapshot.val();
-        if (room.participants.includes(user2Id)) {
+        if (room.participants && room.participants.includes(user2Id)) {
           return roomId;
         }
       }
@@ -90,20 +98,32 @@ export const findChatRoom = async (user1Id: string, user2Id: string): Promise<st
   }
 };
 
-// Send a message in a chat room
+/**
+ * Send a message in a chat room
+ */
 export const sendMessage = async (roomId: string, message: Omit<ChatMessage, 'id'>): Promise<string> => {
   try {
-    const messagesRef = ref(database, `messages/${roomId}`);
-    const newMessageRef = push(messagesRef);
-    const messageId = newMessageRef.key as string;
+    const messageRef = push(ref(database, `messages/${roomId}`));
+    const messageId = messageRef.key;
     
-    await set(newMessageRef, message);
+    if (!messageId) {
+      throw new Error('Failed to generate message ID');
+    }
     
-    // Update the last message in the chat room
-    await set(ref(database, `chatRooms/${roomId}/lastMessage`), {
-      text: message.message,
-      timestamp: message.timestamp,
-      senderId: message.senderId
+    const messageData = {
+      ...message,
+      id: messageId
+    };
+    
+    await set(messageRef, messageData);
+    
+    // Update last message in chat room
+    await update(ref(database, `chatRooms/${roomId}`), {
+      lastMessage: {
+        text: message.message,
+        timestamp: message.timestamp,
+        senderId: message.senderId
+      }
     });
     
     return messageId;
@@ -113,126 +133,120 @@ export const sendMessage = async (roomId: string, message: Omit<ChatMessage, 'id
   }
 };
 
-// Get all messages in a chat room
+/**
+ * Get all messages in a chat room
+ */
 export const getMessages = async (roomId: string): Promise<ChatMessage[]> => {
   try {
-    const messagesRef = ref(database, `messages/${roomId}`);
-    const messagesSnapshot = await get(messagesRef);
+    const messagesSnapshot = await get(ref(database, `messages/${roomId}`));
     
     if (!messagesSnapshot.exists()) {
       return [];
     }
     
-    const messagesObj = messagesSnapshot.val();
-    const messages: ChatMessage[] = [];
+    const messagesData: Record<string, any> = messagesSnapshot.val();
     
-    for (const messageId in messagesObj) {
-      messages.push({
-        id: messageId,
-        ...messagesObj[messageId]
-      });
-    }
-    
-    // Sort messages by timestamp
-    messages.sort((a, b) => a.timestamp - b.timestamp);
-    
-    return messages;
+    return Object.keys(messagesData).map(key => ({
+      id: key,
+      ...messagesData[key]
+    })).sort((a, b) => a.timestamp - b.timestamp);
   } catch (error) {
     console.error('Error getting messages:', error);
     throw error;
   }
 };
 
-// Get all chat rooms for a user
+/**
+ * Get all chat rooms for a user
+ */
 export const getUserChatRooms = async (userId: string): Promise<ChatRoom[]> => {
   try {
-    const userRoomsRef = ref(database, `userChatRooms/${userId}`);
-    const userRoomsSnapshot = await get(userRoomsRef);
+    const userRoomsSnapshot = await get(ref(database, `userChatRooms/${userId}`));
     
     if (!userRoomsSnapshot.exists()) {
       return [];
     }
     
-    const userRoomsObj = userRoomsSnapshot.val();
-    const roomIds = Object.keys(userRoomsObj);
-    const rooms: ChatRoom[] = [];
+    const userRooms: Record<string, boolean> = userRoomsSnapshot.val();
+    const chatRooms: ChatRoom[] = [];
     
-    for (const roomId of roomIds) {
-      const roomRef = ref(database, `chatRooms/${roomId}`);
-      const roomSnapshot = await get(roomRef);
+    // Fetch each chat room
+    for (const roomId of Object.keys(userRooms)) {
+      const roomSnapshot = await get(ref(database, `chatRooms/${roomId}`));
       
       if (roomSnapshot.exists()) {
-        const roomData = roomSnapshot.val();
-        rooms.push({
+        const room = roomSnapshot.val();
+        chatRooms.push({
           id: roomId,
-          ...roomData
+          participants: room.participants,
+          lastMessage: room.lastMessage,
+          createdAt: room.createdAt
         });
       }
     }
     
-    // Sort rooms by last message timestamp (most recent first)
-    rooms.sort((a, b) => {
+    // Sort by last message timestamp (newest first)
+    return chatRooms.sort((a, b) => {
       const timeA = a.lastMessage?.timestamp || a.createdAt;
       const timeB = b.lastMessage?.timestamp || b.createdAt;
       return timeB - timeA;
     });
-    
-    return rooms;
   } catch (error) {
     console.error('Error getting user chat rooms:', error);
     throw error;
   }
 };
 
-// Subscribe to new messages in a chat room
+/**
+ * Subscribe to messages in a chat room
+ */
 export const subscribeToMessages = (roomId: string, callback: (messages: ChatMessage[]) => void) => {
   const messagesRef = ref(database, `messages/${roomId}`);
   
-  onValue(messagesRef, (snapshot) => {
+  const unsubscribe = onValue(messagesRef, (snapshot) => {
     if (!snapshot.exists()) {
       callback([]);
       return;
     }
     
-    const messagesObj = snapshot.val();
-    const messages: ChatMessage[] = [];
+    const messagesData: Record<string, any> = snapshot.val();
     
-    for (const messageId in messagesObj) {
-      messages.push({
-        id: messageId,
-        ...messagesObj[messageId]
-      });
-    }
-    
-    // Sort messages by timestamp
-    messages.sort((a, b) => a.timestamp - b.timestamp);
+    const messages = Object.keys(messagesData).map(key => ({
+      id: key,
+      ...messagesData[key]
+    })).sort((a, b) => a.timestamp - b.timestamp);
     
     callback(messages);
   });
   
-  // Return a function to unsubscribe
-  return () => off(messagesRef);
+  return unsubscribe;
 };
 
-// Mark messages as read
+/**
+ * Mark messages as read in a chat room
+ */
 export const markMessagesAsRead = async (roomId: string, userId: string) => {
   try {
-    const messagesRef = ref(database, `messages/${roomId}`);
-    const messagesSnapshot = await get(messagesRef);
+    const messagesSnapshot = await get(ref(database, `messages/${roomId}`));
     
     if (!messagesSnapshot.exists()) {
       return;
     }
     
-    const messagesObj = messagesSnapshot.val();
+    const messagesData: Record<string, any> = messagesSnapshot.val();
+    const updates: Record<string, any> = {};
     
-    for (const messageId in messagesObj) {
-      const message = messagesObj[messageId];
-      
-      // Only mark messages sent to this user as read
+    // Find messages to mark as read
+    Object.keys(messagesData).forEach(key => {
+      const message = messagesData[key];
       if (message.recipientId === userId && !message.read) {
-        await set(ref(database, `messages/${roomId}/${messageId}/read`), true);
+        updates[`messages/${roomId}/${key}/read`] = true;
       }
+    });
+    
+    // Apply updates if there are any
+    if (Object.keys(updates).length > 0) {
+      await update(ref(database), updates);
     }
   } catch (error) {
     console.error('Error marking messages as read:', error);

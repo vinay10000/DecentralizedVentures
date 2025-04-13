@@ -1,22 +1,23 @@
 import { 
   collection, 
-  query, 
-  where, 
-  getDocs, 
-  getDoc, 
-  doc, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  Timestamp,
+  doc,
+  addDoc,
+  setDoc,
+  getDoc,
+  getDocs,
+  updateDoc,
+  query,
+  where,
   orderBy,
   limit,
   startAfter,
+  increment,
+  Timestamp,
   DocumentData
-} from "firebase/firestore";
-import { firestore } from "./config";
+} from 'firebase/firestore';
+import { firestore } from './config';
 
-// Startup Types
+// Startup data interface
 export interface StartupData {
   id?: string;
   name: string;
@@ -37,6 +38,7 @@ export interface StartupData {
   updatedAt: Timestamp | string;
 }
 
+// Startup document interface
 export interface StartupDocument {
   id?: string;
   startupId: string;
@@ -48,6 +50,7 @@ export interface StartupDocument {
   createdAt: Timestamp | string;
 }
 
+// Startup update/post interface
 export interface StartupUpdate {
   id?: string;
   startupId: string;
@@ -55,7 +58,7 @@ export interface StartupUpdate {
   createdAt: Timestamp | string;
 }
 
-// Investment Transaction Types
+// Transaction data interface
 export interface TransactionData {
   id?: string;
   investorId: string;
@@ -70,22 +73,26 @@ export interface TransactionData {
   createdAt: Timestamp | string;
 }
 
-// CRUD Operations for Startups
+/**
+ * Create a new startup
+ */
 export const createStartup = async (startupData: Omit<StartupData, 'id' | 'createdAt' | 'updatedAt' | 'fundingRaised' | 'investors'>) => {
   try {
-    const now = new Date().toISOString();
-    const newStartup = {
+    const now = Timestamp.now();
+    
+    const data = {
       ...startupData,
       fundingRaised: 0,
       investors: 0,
       createdAt: now,
       updatedAt: now
     };
-
-    const docRef = await addDoc(collection(firestore, 'startups'), newStartup);
+    
+    const docRef = await addDoc(collection(firestore, 'startups'), data);
+    
     return {
       id: docRef.id,
-      ...newStartup
+      ...data
     };
   } catch (error) {
     console.error('Error creating startup:', error);
@@ -93,77 +100,90 @@ export const createStartup = async (startupData: Omit<StartupData, 'id' | 'creat
   }
 };
 
+/**
+ * Get a startup by its ID
+ */
 export const getStartupById = async (startupId: string) => {
   try {
     const docRef = doc(firestore, 'startups', startupId);
-    const startupDoc = await getDoc(docRef);
+    const docSnap = await getDoc(docRef);
     
-    if (startupDoc.exists()) {
-      return {
-        id: startupDoc.id,
-        ...startupDoc.data()
-      } as StartupData;
+    if (!docSnap.exists()) {
+      return null;
     }
     
-    return null;
+    return {
+      id: docSnap.id,
+      ...docSnap.data()
+    } as StartupData;
   } catch (error) {
     console.error('Error getting startup:', error);
     throw error;
   }
 };
 
+/**
+ * Get a startup by founder ID
+ */
 export const getStartupByFounderId = async (founderId: string) => {
   try {
-    const q = query(collection(firestore, 'startups'), where('founderId', '==', founderId));
+    const q = query(
+      collection(firestore, 'startups'),
+      where('founderId', '==', founderId),
+      limit(1)
+    );
+    
     const querySnapshot = await getDocs(q);
     
-    if (!querySnapshot.empty) {
-      const startupDoc = querySnapshot.docs[0];
-      return {
-        id: startupDoc.id,
-        ...startupDoc.data()
-      } as StartupData;
+    if (querySnapshot.empty) {
+      return null;
     }
     
-    return null;
+    const docSnap = querySnapshot.docs[0];
+    
+    return {
+      id: docSnap.id,
+      ...docSnap.data()
+    } as StartupData;
   } catch (error) {
-    console.error('Error getting startup by founder:', error);
+    console.error('Error getting startup by founder ID:', error);
     throw error;
   }
 };
 
+/**
+ * Get all startups with pagination
+ */
 export const getAllStartups = async (lastStartup?: DocumentData, pageSize = 10) => {
   try {
-    let startupQuery;
+    let q = query(
+      collection(firestore, 'startups'),
+      orderBy('createdAt', 'desc'),
+      limit(pageSize)
+    );
     
     if (lastStartup) {
-      startupQuery = query(
+      q = query(
         collection(firestore, 'startups'),
         orderBy('createdAt', 'desc'),
         startAfter(lastStartup),
         limit(pageSize)
       );
-    } else {
-      startupQuery = query(
-        collection(firestore, 'startups'),
-        orderBy('createdAt', 'desc'),
-        limit(pageSize)
-      );
     }
     
-    const querySnapshot = await getDocs(startupQuery);
+    const querySnapshot = await getDocs(q);
     
-    const startups: StartupData[] = [];
-    querySnapshot.forEach(doc => {
-      startups.push({
-        id: doc.id,
-        ...doc.data()
-      } as StartupData);
-    });
+    const startups = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as StartupData[];
+    
+    const lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
     
     return {
       startups,
-      lastVisible: querySnapshot.docs[querySnapshot.docs.length - 1]
+      lastVisible,
+      hasMore: querySnapshot.docs.length === pageSize
     };
   } catch (error) {
     console.error('Error getting all startups:', error);
@@ -171,64 +191,63 @@ export const getAllStartups = async (lastStartup?: DocumentData, pageSize = 10) 
   }
 };
 
+/**
+ * Get filtered startups with pagination
+ */
 export const getFilteredStartups = async (
   filters: {
-    investmentStage?: string;
     industry?: string;
-    searchTerm?: string;
+    investmentStage?: string;
+    minFundingGoal?: number;
+    maxFundingGoal?: number;
   },
-  sortBy = 'createdAt',
   lastStartup?: DocumentData,
   pageSize = 10
 ) => {
   try {
-    let startupQuery = collection(firestore, 'startups');
-    let constraints = [];
+    // Build query
+    let q = query(
+      collection(firestore, 'startups'),
+      orderBy('createdAt', 'desc')
+    );
     
-    if (filters.investmentStage && filters.investmentStage !== 'All Stages') {
-      constraints.push(where('investmentStage', '==', filters.investmentStage));
+    // Add filters
+    if (filters.industry) {
+      q = query(q, where('industry', '==', filters.industry));
     }
     
-    if (filters.industry && filters.industry !== 'All Industries') {
-      constraints.push(where('industry', '==', filters.industry));
+    if (filters.investmentStage) {
+      q = query(q, where('investmentStage', '==', filters.investmentStage));
     }
     
-    // Note: For text search, Firestore doesn't have built-in full text search
-    // For production, might need to use Algolia or similar
-    // This is a simplified implementation
-    
-    let queryObj;
-    if (constraints.length > 0) {
-      queryObj = query(startupQuery, ...constraints, orderBy(sortBy, 'desc'), limit(pageSize));
-    } else {
-      queryObj = query(startupQuery, orderBy(sortBy, 'desc'), limit(pageSize));
+    if (filters.minFundingGoal) {
+      q = query(q, where('fundingGoal', '>=', filters.minFundingGoal));
     }
     
+    if (filters.maxFundingGoal) {
+      q = query(q, where('fundingGoal', '<=', filters.maxFundingGoal));
+    }
+    
+    // Add pagination
     if (lastStartup) {
-      queryObj = query(queryObj, startAfter(lastStartup));
+      q = query(q, startAfter(lastStartup));
     }
     
-    const querySnapshot = await getDocs(queryObj);
+    q = query(q, limit(pageSize));
     
-    const startups: StartupData[] = [];
-    querySnapshot.forEach(doc => {
-      const data = doc.data() as StartupData;
-      
-      // If there's a search term, filter in memory
-      if (filters.searchTerm && !data.name.toLowerCase().includes(filters.searchTerm.toLowerCase()) &&
-          !data.description.toLowerCase().includes(filters.searchTerm.toLowerCase())) {
-        return;
-      }
-      
-      startups.push({
-        id: doc.id,
-        ...data
-      });
-    });
+    const querySnapshot = await getDocs(q);
+    
+    const startups = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as StartupData[];
+    
+    const lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1];
     
     return {
       startups,
-      lastVisible: querySnapshot.docs[querySnapshot.docs.length - 1]
+      lastVisible,
+      hasMore: querySnapshot.docs.length === pageSize
     };
   } catch (error) {
     console.error('Error getting filtered startups:', error);
@@ -236,36 +255,51 @@ export const getFilteredStartups = async (
   }
 };
 
+/**
+ * Update a startup
+ */
 export const updateStartup = async (startupId: string, updateData: Partial<StartupData>) => {
   try {
-    const startupRef = doc(firestore, 'startups', startupId);
-    await updateDoc(startupRef, {
+    const docRef = doc(firestore, 'startups', startupId);
+    
+    // Add updated timestamp
+    const data = {
       ...updateData,
-      updatedAt: new Date().toISOString()
-    });
+      updatedAt: Timestamp.now()
+    };
+    
+    await updateDoc(docRef, data);
     
     // Get the updated startup
-    const updatedStartup = await getStartupById(startupId);
-    return updatedStartup;
+    const docSnap = await getDoc(docRef);
+    
+    return {
+      id: docSnap.id,
+      ...docSnap.data()
+    } as StartupData;
   } catch (error) {
     console.error('Error updating startup:', error);
     throw error;
   }
 };
 
-// Startup Documents
+/**
+ * Add a startup document
+ */
 export const addStartupDocument = async (documentData: Omit<StartupDocument, 'id' | 'createdAt'>) => {
   try {
-    const now = new Date().toISOString();
-    const newDocument = {
+    const now = Timestamp.now();
+    
+    const data = {
       ...documentData,
       createdAt: now
     };
     
-    const docRef = await addDoc(collection(firestore, 'startupDocuments'), newDocument);
+    const docRef = await addDoc(collection(firestore, 'startupDocuments'), data);
+    
     return {
       id: docRef.id,
-      ...newDocument
+      ...data
     };
   } catch (error) {
     console.error('Error adding startup document:', error);
@@ -273,6 +307,9 @@ export const addStartupDocument = async (documentData: Omit<StartupDocument, 'id
   }
 };
 
+/**
+ * Get startup documents
+ */
 export const getStartupDocuments = async (startupId: string) => {
   try {
     const q = query(
@@ -283,34 +320,33 @@ export const getStartupDocuments = async (startupId: string) => {
     
     const querySnapshot = await getDocs(q);
     
-    const documents: StartupDocument[] = [];
-    querySnapshot.forEach(doc => {
-      documents.push({
-        id: doc.id,
-        ...doc.data()
-      } as StartupDocument);
-    });
-    
-    return documents;
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as StartupDocument[];
   } catch (error) {
     console.error('Error getting startup documents:', error);
     throw error;
   }
 };
 
-// Startup Updates
+/**
+ * Add a startup update/post
+ */
 export const addStartupUpdate = async (updateData: Omit<StartupUpdate, 'id' | 'createdAt'>) => {
   try {
-    const now = new Date().toISOString();
-    const newUpdate = {
+    const now = Timestamp.now();
+    
+    const data = {
       ...updateData,
       createdAt: now
     };
     
-    const docRef = await addDoc(collection(firestore, 'startupUpdates'), newUpdate);
+    const docRef = await addDoc(collection(firestore, 'startupUpdates'), data);
+    
     return {
       id: docRef.id,
-      ...newUpdate
+      ...data
     };
   } catch (error) {
     console.error('Error adding startup update:', error);
@@ -318,6 +354,9 @@ export const addStartupUpdate = async (updateData: Omit<StartupUpdate, 'id' | 'c
   }
 };
 
+/**
+ * Get startup updates/posts
+ */
 export const getStartupUpdates = async (startupId: string) => {
   try {
     const q = query(
@@ -328,65 +367,44 @@ export const getStartupUpdates = async (startupId: string) => {
     
     const querySnapshot = await getDocs(q);
     
-    const updates: StartupUpdate[] = [];
-    querySnapshot.forEach(doc => {
-      updates.push({
-        id: doc.id,
-        ...doc.data()
-      } as StartupUpdate);
-    });
-    
-    return updates;
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as StartupUpdate[];
   } catch (error) {
     console.error('Error getting startup updates:', error);
     throw error;
   }
 };
 
-// Investment Transactions
+/**
+ * Create a transaction
+ */
 export const createTransaction = async (transactionData: Omit<TransactionData, 'id' | 'createdAt'>) => {
   try {
-    const now = new Date().toISOString();
-    const newTransaction = {
+    const now = Timestamp.now();
+    
+    const data = {
       ...transactionData,
       createdAt: now
     };
     
-    const docRef = await addDoc(collection(firestore, 'transactions'), newTransaction);
+    const docRef = await addDoc(collection(firestore, 'transactions'), data);
     
-    // Update startup funding raised and investors count
-    const startupRef = doc(firestore, 'startups', transactionData.startupId);
-    const startupDoc = await getDoc(startupRef);
-    
-    if (startupDoc.exists()) {
-      const startupData = startupDoc.data() as StartupData;
-      const newFundingRaised = (startupData.fundingRaised || 0) + transactionData.amount;
-      
-      // Check if this investor has invested before
-      const investorQ = query(
-        collection(firestore, 'transactions'),
-        where('startupId', '==', transactionData.startupId),
-        where('investorId', '==', transactionData.investorId),
-        where('status', '==', 'completed')
-      );
-      const investorQuerySnapshot = await getDocs(investorQ);
-      
-      // Only increment investors count if this is the first investment from this investor
-      const isNewInvestor = investorQuerySnapshot.empty;
-      const newInvestorsCount = isNewInvestor 
-        ? (startupData.investors || 0) + 1 
-        : (startupData.investors || 0);
+    // Update startup funding and investor count if transaction is completed
+    if (transactionData.status === 'completed') {
+      const startupRef = doc(firestore, 'startups', transactionData.startupId);
       
       await updateDoc(startupRef, {
-        fundingRaised: newFundingRaised,
-        investors: newInvestorsCount,
+        fundingRaised: increment(transactionData.amount),
+        investors: increment(1),
         updatedAt: now
       });
     }
     
     return {
       id: docRef.id,
-      ...newTransaction
+      ...data
     };
   } catch (error) {
     console.error('Error creating transaction:', error);
@@ -394,78 +412,95 @@ export const createTransaction = async (transactionData: Omit<TransactionData, '
   }
 };
 
+/**
+ * Update transaction status
+ */
 export const updateTransactionStatus = async (transactionId: string, status: 'pending' | 'completed' | 'failed', transactionHash?: string) => {
   try {
-    const transactionRef = doc(firestore, 'transactions', transactionId);
-    const updateData: any = { status };
+    const docRef = doc(firestore, 'transactions', transactionId);
+    const docSnap = await getDoc(docRef);
+    
+    if (!docSnap.exists()) {
+      throw new Error('Transaction not found');
+    }
+    
+    const transaction = docSnap.data() as TransactionData;
+    const previousStatus = transaction.status;
+    
+    // Update transaction status
+    const updateData: Record<string, any> = { status };
     
     if (transactionHash) {
       updateData.transactionId = transactionHash;
     }
     
-    await updateDoc(transactionRef, updateData);
+    await updateDoc(docRef, updateData);
     
-    // If status is failed, we may need to revert the startup funding changes
-    if (status === 'failed') {
-      const transactionDoc = await getDoc(transactionRef);
+    // Update startup funding and investor count if status changed to completed
+    if (previousStatus !== 'completed' && status === 'completed') {
+      const startupRef = doc(firestore, 'startups', transaction.startupId);
       
-      if (transactionDoc.exists()) {
-        const transactionData = transactionDoc.data() as TransactionData;
-        
-        // Only revert if it was previously completed
-        if (transactionData.status === 'completed') {
-          const startupRef = doc(firestore, 'startups', transactionData.startupId);
-          const startupDoc = await getDoc(startupRef);
-          
-          if (startupDoc.exists()) {
-            const startupData = startupDoc.data() as StartupData;
-            const newFundingRaised = (startupData.fundingRaised || 0) - transactionData.amount;
-            
-            // We don't decrement the investors count as it's more complex to determine
-            await updateDoc(startupRef, {
-              fundingRaised: newFundingRaised > 0 ? newFundingRaised : 0,
-              updatedAt: new Date().toISOString()
-            });
-          }
-        }
-      }
+      await updateDoc(startupRef, {
+        fundingRaised: increment(transaction.amount),
+        investors: increment(1),
+        updatedAt: Timestamp.now()
+      });
     }
+    
+    // If status changed from completed to failed, decrement funding and investor count
+    if (previousStatus === 'completed' && status === 'failed') {
+      const startupRef = doc(firestore, 'startups', transaction.startupId);
+      
+      await updateDoc(startupRef, {
+        fundingRaised: increment(-transaction.amount),
+        investors: increment(-1),
+        updatedAt: Timestamp.now()
+      });
+    }
+    
+    const updatedDocSnap = await getDoc(docRef);
+    
+    return {
+      id: updatedDocSnap.id,
+      ...updatedDocSnap.data()
+    } as TransactionData;
   } catch (error) {
     console.error('Error updating transaction status:', error);
     throw error;
   }
 };
 
+/**
+ * Get user transactions
+ */
 export const getUserTransactions = async (userId: string, role: 'investor' | 'startup') => {
   try {
-    const fieldToQuery = role === 'investor' ? 'investorId' : 'startupId';
+    const field = role === 'investor' ? 'investorId' : 'startupId';
     
     const q = query(
       collection(firestore, 'transactions'),
-      where(fieldToQuery, '==', userId),
+      where(field, '==', userId),
       orderBy('createdAt', 'desc')
     );
     
     const querySnapshot = await getDocs(q);
     
-    const transactions: TransactionData[] = [];
-    querySnapshot.forEach(doc => {
-      transactions.push({
-        id: doc.id,
-        ...doc.data()
-      } as TransactionData);
-    });
-    
-    return transactions;
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as TransactionData[];
   } catch (error) {
     console.error('Error getting user transactions:', error);
     throw error;
   }
 };
 
-// Get user investment statistics
+/**
+ * Get investor stats
+ */
 export const getInvestorStats = async (investorId: string) => {
   try {
+    // Get all completed transactions
     const q = query(
       collection(firestore, 'transactions'),
       where('investorId', '==', investorId),
@@ -474,19 +509,19 @@ export const getInvestorStats = async (investorId: string) => {
     
     const querySnapshot = await getDocs(q);
     
-    let totalInvested = 0;
-    const startupIds = new Set<string>();
+    const transactions = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as TransactionData[];
     
-    querySnapshot.forEach(doc => {
-      const data = doc.data() as TransactionData;
-      totalInvested += data.amount;
-      startupIds.add(data.startupId);
-    });
+    // Calculate stats
+    const totalInvested = transactions.reduce((sum, tx) => sum + tx.amount, 0);
+    const activeInvestments = new Set(transactions.map(tx => tx.startupId)).size;
     
     return {
       totalInvested,
-      activeInvestments: startupIds.size,
-      totalTransactions: querySnapshot.size
+      activeInvestments,
+      totalTransactions: transactions.length
     };
   } catch (error) {
     console.error('Error getting investor stats:', error);
@@ -494,16 +529,19 @@ export const getInvestorStats = async (investorId: string) => {
   }
 };
 
+/**
+ * Get startup stats
+ */
 export const getStartupStats = async (startupId: string) => {
   try {
-    const startupDoc = await getDoc(doc(firestore, 'startups', startupId));
+    // Get startup data
+    const startupDoc = await getStartupById(startupId);
     
-    if (!startupDoc.exists()) {
+    if (!startupDoc) {
       throw new Error('Startup not found');
     }
     
-    const startupData = startupDoc.data() as StartupData;
-    
+    // Get completed transactions
     const q = query(
       collection(firestore, 'transactions'),
       where('startupId', '==', startupId),
@@ -512,18 +550,20 @@ export const getStartupStats = async (startupId: string) => {
     
     const querySnapshot = await getDocs(q);
     
-    const uniqueInvestors = new Set<string>();
-    querySnapshot.forEach(doc => {
-      const data = doc.data() as TransactionData;
-      uniqueInvestors.add(data.investorId);
-    });
+    const transactions = querySnapshot.docs.map(doc => doc.data());
+    
+    // Calculate stats
+    const fundingRaised = startupDoc.fundingRaised;
+    const fundingGoal = startupDoc.fundingGoal;
+    const progress = fundingGoal > 0 ? (fundingRaised / fundingGoal) * 100 : 0;
+    const investors = startupDoc.investors;
     
     return {
-      fundingRaised: startupData.fundingRaised || 0,
-      fundingGoal: startupData.fundingGoal || 0,
-      progress: startupData.fundingGoal ? (startupData.fundingRaised / startupData.fundingGoal) * 100 : 0,
-      investors: uniqueInvestors.size,
-      totalTransactions: querySnapshot.size
+      fundingRaised,
+      fundingGoal,
+      progress,
+      investors,
+      totalTransactions: transactions.length
     };
   } catch (error) {
     console.error('Error getting startup stats:', error);
