@@ -44,7 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Function to fetch user data from Firestore
   const fetchUserData = async (fbUser: FirebaseUser) => {
     try {
-      const userData = await getUserData(fbUser);
+      const userData = await getUserData(fbUser.uid);
       
       if (userData) {
         setUser({
@@ -54,7 +54,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           photoURL: fbUser.photoURL,
           role: userData.role || 'investor',
           walletAddress: userData.walletAddress || null,
-          createdAt: userData.createdAt ? new Date(userData.createdAt.toDate()).toISOString() : undefined,
+          createdAt: userData.createdAt || undefined,
         });
       } else {
         // If no user data is found in Firestore, set default values

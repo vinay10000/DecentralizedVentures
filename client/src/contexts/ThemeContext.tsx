@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useState, useEffect, useContext } from 'react';
 
 type Theme = 'light' | 'dark';
 
@@ -9,33 +9,37 @@ interface ThemeContextProps {
 
 export const ThemeContext = createContext<ThemeContextProps>({
   theme: 'light',
-  setTheme: () => {},
+  setTheme: () => null,
 });
 
 export const useTheme = () => useContext(ThemeContext);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setTheme] = useState<Theme>(() => {
-    // Check for saved preference in localStorage
-    const savedTheme = localStorage.getItem('theme') as Theme | null;
-    
-    // If no saved preference, check user's system preference
-    if (!savedTheme) {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    }
-    
-    return savedTheme;
-  });
+  const [theme, setTheme] = useState<Theme>('light');
 
+  // Load theme preference from localStorage on initial render
   useEffect(() => {
-    // Update document class when theme changes
+    const savedTheme = localStorage.getItem('theme') as Theme | null;
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    
+    if (savedTheme) {
+      setTheme(savedTheme);
+    } else if (prefersDark) {
+      setTheme('dark');
+    }
+  }, []);
+
+  // Apply theme changes to the document
+  useEffect(() => {
+    const root = window.document.documentElement;
+    
     if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
+      root.classList.add('dark');
     } else {
-      document.documentElement.classList.remove('dark');
+      root.classList.remove('dark');
     }
     
-    // Save to localStorage
+    // Save theme preference to localStorage
     localStorage.setItem('theme', theme);
   }, [theme]);
 

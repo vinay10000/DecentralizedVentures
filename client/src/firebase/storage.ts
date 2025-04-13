@@ -1,73 +1,50 @@
-import { 
-  ref as storageRef, 
-  uploadBytes, 
-  getDownloadURL, 
-  deleteObject,
-  uploadString,
-  uploadBytesResumable
-} from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
 import { storage } from './config';
-
-// Upload options interface
-export interface UploadOptions {
-  contentType?: string;
-  customMetadata?: Record<string, string>;
-}
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Upload a file to Firebase Storage
- * @param file The file to upload
- * @param path The path in storage where the file should be saved
- * @param options Additional upload options
- * @returns The download URL for the uploaded file
+ * @param file File to upload
+ * @param path Path in storage where the file should be stored
+ * @returns Download URL of the uploaded file
  */
 export const uploadFile = async (
   file: File, 
-  path: string,
-  options?: UploadOptions
+  path: string = 'uploads'
 ): Promise<string> => {
-  try {
-    // Create a reference to the file location
-    const fileRef = storageRef(storage, path);
-    
-    // Upload the file
-    const uploadResult = await uploadBytes(fileRef, file, {
-      contentType: options?.contentType || file.type,
-      customMetadata: options?.customMetadata
-    });
-    
-    // Get the download URL
-    const downloadURL = await getDownloadURL(uploadResult.ref);
-    
-    return downloadURL;
-  } catch (error) {
-    console.error('Error uploading file:', error);
-    throw error;
-  }
+  // Generate a unique filename to prevent collisions
+  const filename = `${uuidv4()}-${file.name}`;
+  const storageRef = ref(storage, `${path}/${filename}`);
+  
+  // Upload the file
+  const snapshot = await uploadBytes(storageRef, file);
+  
+  // Get and return the download URL
+  return getDownloadURL(snapshot.ref);
 };
 
 /**
- * Get the download URL for a file in Firebase Storage
- * @param path The path to the file in storage
- * @returns The download URL for the file
+ * Upload multiple files to Firebase Storage
+ * @param files Array of files to upload
+ * @param path Path in storage where the files should be stored
+ * @returns Array of download URLs of the uploaded files
  */
-export const getFileURL = async (path: string): Promise<string> => {
-  try {
-    const fileRef = storageRef(storage, path);
-    return await getDownloadURL(fileRef);
-  } catch (error) {
-    console.error('Error getting file URL:', error);
-    throw error;
-  }
+export const uploadMultipleFiles = async (
+  files: File[], 
+  path: string = 'uploads'
+): Promise<string[]> => {
+  const uploadPromises = files.map(file => uploadFile(file, path));
+  return Promise.all(uploadPromises);
 };
 
 /**
- * Delete a file from Firebase Storage
- * @param path The path to the file in storage
+ * Delete a file from Firebase Storage by its URL
+ * @param url Download URL of the file to delete
  */
-export const deleteFile = async (path: string): Promise<void> => {
+export const deleteFileByUrl = async (url: string): Promise<void> => {
   try {
-    const fileRef = storageRef(storage, path);
+    // Extract the path from the URL (this is Firebase Storage specific)
+    const fileRef = ref(storage, url);
     await deleteObject(fileRef);
   } catch (error) {
     console.error('Error deleting file:', error);
@@ -76,67 +53,78 @@ export const deleteFile = async (path: string): Promise<void> => {
 };
 
 /**
- * Upload a startup document
- * @param startupId The ID of the startup
- * @param file The file to upload
- * @param type The type of document
- * @returns The download URL for the uploaded document
+ * Delete a file from Firebase Storage by its path
+ * @param path Path of the file to delete
  */
-export const uploadStartupDocument = async (
-  startupId: string,
-  file: File,
-  type: 'pitchDeck' | 'financialReport' | 'investorAgreement' | 'riskDisclosure'
-): Promise<string> => {
-  const timestamp = Date.now();
-  const fileName = `${file.name.split('.')[0]}_${timestamp}.${file.name.split('.').pop()}`;
-  const path = `startups/${startupId}/documents/${type}/${fileName}`;
-  
-  return await uploadFile(file, path, {
-    customMetadata: {
-      startupId,
-      documentType: type,
-      originalName: file.name
-    }
-  });
+export const deleteFileByPath = async (path: string): Promise<void> => {
+  try {
+    const fileRef = ref(storage, path);
+    await deleteObject(fileRef);
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    throw error;
+  }
 };
 
 /**
- * Upload a startup image (logo or cover)
- * @param startupId The ID of the startup
- * @param file The image file to upload
- * @param type The type of image (logo or cover)
- * @returns The download URL for the uploaded image
+ * List all files in a specific directory
+ * @param path Directory path in storage
+ * @returns Array of download URLs of all files in the directory
  */
-export const uploadStartupImage = async (
-  startupId: string,
-  file: File,
-  type: 'logo' | 'cover'
-): Promise<string> => {
-  if (!file.type.startsWith('image/')) {
-    throw new Error('File must be an image');
+export const listFiles = async (path: string): Promise<string[]> => {
+  try {
+    const directoryRef = ref(storage, path);
+    const result = await listAll(directoryRef);
+    
+    const urlPromises = result.items.map(item => getDownloadURL(item));
+    return Promise.all(urlPromises);
+  } catch (error) {
+    console.error('Error listing files:', error);
+    throw error;
   }
-  
-  const timestamp = Date.now();
-  const fileName = `${type}_${timestamp}.${file.name.split('.').pop()}`;
-  const path = `startups/${startupId}/images/${fileName}`;
-  
-  return await uploadFile(file, path);
+};
+
+/**
+ * Get a file's download URL from its path
+ * @param path Path of the file in storage
+ * @returns Download URL of the file
+ */
+export const getFileUrl = async (path: string): Promise<string> => {
+  try {
+    const fileRef = ref(storage, path);
+    return getDownloadURL(fileRef);
+  } catch (error) {
+    console.error('Error getting file URL:', error);
+    throw error;
+  }
+};
+
+/**
+ * Upload a startup profile image
+ * @param file Image file to upload
+ * @param startupId ID of the startup
+ * @returns Download URL of the uploaded image
+ */
+export const uploadStartupImage = async (file: File, startupId: string): Promise<string> => {
+  return uploadFile(file, `startups/${startupId}/images`);
+};
+
+/**
+ * Upload a startup document (PDF, etc.)
+ * @param file Document file to upload
+ * @param startupId ID of the startup
+ * @returns Download URL of the uploaded document
+ */
+export const uploadStartupDocument = async (file: File, startupId: string): Promise<string> => {
+  return uploadFile(file, `startups/${startupId}/documents`);
 };
 
 /**
  * Upload a user profile picture
- * @param userId The ID of the user
- * @param file The image file to upload
- * @returns The download URL for the uploaded image
+ * @param file Image file to upload
+ * @param userId ID of the user
+ * @returns Download URL of the uploaded image
  */
-export const uploadUserProfilePicture = async (userId: string, file: File): Promise<string> => {
-  if (!file.type.startsWith('image/')) {
-    throw new Error('File must be an image');
-  }
-  
-  const timestamp = Date.now();
-  const fileName = `profile_${timestamp}.${file.name.split('.').pop()}`;
-  const path = `users/${userId}/profile/${fileName}`;
-  
-  return await uploadFile(file, path);
+export const uploadUserProfilePicture = async (file: File, userId: string): Promise<string> => {
+  return uploadFile(file, `users/${userId}/profile`);
 };
