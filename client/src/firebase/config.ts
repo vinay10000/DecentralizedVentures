@@ -3,6 +3,7 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getDatabase } from "firebase/database";
+import { getAnalytics, isSupported } from "firebase/analytics";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -24,4 +25,14 @@ const firestore = getFirestore(app);
 const storage = getStorage(app);
 const database = getDatabase(app);
 
-export { app, auth, firestore, storage, database };
+// Initialize Analytics conditionally (only in browser environment)
+let analytics = null;
+isSupported().then(supported => {
+  if (supported) {
+    analytics = getAnalytics(app);
+  }
+}).catch(err => {
+  console.error("Analytics initialization error", err);
+});
+
+export { app, auth, firestore, storage, database, analytics };
