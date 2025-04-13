@@ -1,31 +1,9 @@
 import { Button } from '@/components/ui/button';
 import { Link } from 'wouter';
-import { useAuth } from '@/hooks/useAuth';
-import { StartupData } from '@/firebase/firestore';
-import { useState, useEffect } from 'react';
-import { getAllStartups } from '@/firebase/firestore';
-import StartupCard from '@/components/startup/StartupCard';
 import { ArrowRight, CheckCircle } from 'lucide-react';
 
 const LandingPage = () => {
-  const { user } = useAuth();
-  const [featuredStartups, setFeaturedStartups] = useState<StartupData[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchStartups = async () => {
-      try {
-        const { startups } = await getAllStartups(undefined, 3);
-        setFeaturedStartups(startups);
-      } catch (error) {
-        console.error('Error fetching startups:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchStartups();
-  }, []);
+  // Static landing page that doesn't depend on authentication or Firestore data
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -43,15 +21,15 @@ const LandingPage = () => {
                 Fund the next big innovation using crypto or traditional payments.
               </p>
               <div className="mt-8 flex flex-wrap gap-4">
-                <Link href={user ? (user.role === 'investor' ? '/investor/dashboard' : '/startup/dashboard') : '/auth'}>
+                <Link href="/auth">
                   <Button size="lg" className="px-8">
-                    {user ? 'Go to Dashboard' : 'Get Started'}
+                    Get Started
                     <ArrowRight className="ml-2 h-5 w-5" />
                   </Button>
                 </Link>
-                <Link href="/investor/discover">
+                <Link href="/debug">
                   <Button variant="outline" size="lg" className="px-8">
-                    Explore Startups
+                    Debug Firebase
                   </Button>
                 </Link>
               </div>
@@ -94,36 +72,59 @@ const LandingPage = () => {
             </p>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {loading ? (
-              Array(3).fill(0).map((_, i) => (
-                <div key={i} className="bg-white dark:bg-dark-100 rounded-lg shadow-sm overflow-hidden animate-pulse">
-                  <div className="h-48 bg-gray-200 dark:bg-gray-700"></div>
-                  <div className="p-5 space-y-3">
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4"></div>
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full"></div>
-                    <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full"></div>
-                    <div className="pt-2 flex justify-between">
-                      <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/3"></div>
-                      <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/3"></div>
-                    </div>
-                  </div>
-                </div>
-              ))
-            ) : featuredStartups.length > 0 ? (
-              featuredStartups.map((startup) => (
-                <StartupCard key={startup.id} startup={startup} />
-              ))
-            ) : (
-              <div className="col-span-3 text-center py-10">
-                <p className="text-gray-500 dark:text-gray-400">No startups found</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {/* Static startup cards instead of dynamic ones */}
+            <div className="bg-white dark:bg-dark-100 rounded-lg shadow-sm overflow-hidden">
+              <div className="h-48 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8h4m-4 4h4m-4 4h4" />
+                </svg>
               </div>
-            )}
+              <div className="p-5">
+                <h3 className="font-bold text-lg mb-2">EcoTech Solutions</h3>
+                <p className="text-sm text-gray-500 mb-3">Renewable energy storage solutions for residential buildings</p>
+                <div className="flex justify-between items-center">
+                  <span className="text-primary-600 font-medium">$2.5M goal</span>
+                  <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded">Seed Stage</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white dark:bg-dark-100 rounded-lg shadow-sm overflow-hidden">
+              <div className="h-48 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+              <div className="p-5">
+                <h3 className="font-bold text-lg mb-2">MedTech Innovations</h3>
+                <p className="text-sm text-gray-500 mb-3">AI-powered diagnostic tools for early disease detection</p>
+                <div className="flex justify-between items-center">
+                  <span className="text-primary-600 font-medium">$5M goal</span>
+                  <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">Series A</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white dark:bg-dark-100 rounded-lg shadow-sm overflow-hidden">
+              <div className="h-48 bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                </svg>
+              </div>
+              <div className="p-5">
+                <h3 className="font-bold text-lg mb-2">CloudSecure</h3>
+                <p className="text-sm text-gray-500 mb-3">Next-generation cloud security platform for enterprises</p>
+                <div className="flex justify-between items-center">
+                  <span className="text-primary-600 font-medium">$8M goal</span>
+                  <span className="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded">Series B</span>
+                </div>
+              </div>
+            </div>
           </div>
           
           <div className="text-center mt-12">
-            <Link href="/investor/discover">
+            <Link href="/debug">
               <Button size="lg">
                 View All Startups
                 <ArrowRight className="ml-2 h-5 w-5" />
