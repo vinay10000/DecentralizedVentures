@@ -6,6 +6,7 @@ import Navbar from "@/components/layout/Navbar";
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/index";
 import AuthPage from "@/pages/auth";
+import DebugPage from "@/pages/debug";
 import InvestorDashboard from "@/pages/investor/dashboard";
 import DiscoverStartups from "@/pages/investor/discover";
 import InvestorTransactions from "@/pages/investor/transactions";
@@ -37,6 +38,7 @@ function Router() {
           {/* Public routes */}
           <Route path="/" component={LandingPage} />
           <Route path="/auth" component={AuthPage} />
+          <Route path="/debug" component={DebugPage} />
           
           {/* Protected investor routes */}
           <Route path="/investor/dashboard">
